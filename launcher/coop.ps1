@@ -11,7 +11,8 @@ $stopFile = Join-Path $here 'coop.stop'
 if ($Stop) { New-Item -ItemType File $stopFile -Force | Out-Null; 'Mod stopped.'; return }
 if ($Peer -notmatch '^7656119\d{10}$') { throw 'Usage: coop.ps1 -Peer <SteamID64 of your friend, 17 digits starting with 7656119>' }
 
-$p = Get-Process CrashBandicootNSaneTrilogy -ErrorAction SilentlyContinue | Select-Object -First 1
+# only the game installed by Steam (the mod supports the Steam build only; copies elsewhere, e.g. test copies, are ignored)
+$p = Get-Process CrashBandicootNSaneTrilogy -ErrorAction SilentlyContinue | Where-Object { $_.Path -match '\\steamapps\\' } | Select-Object -First 1
 if (-not $p) { throw 'Start Crash Bandicoot N. Sane Trilogy from Steam first.' }
 Remove-Item $stopFile -ErrorAction SilentlyContinue
 Set-Content (Join-Path $here "coop-$($p.Id).cfg") "me steam $Peer" -Encoding ascii

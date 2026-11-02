@@ -18,7 +18,7 @@ $S = @{
     peerLbl = "SteamID64 de ton ami (ou le lien de son profil Steam) :"
     game = '1. Lancer le jeu'; mod = '2. Activer le mod'; stop = 'Arrêter le mod'
     auto = 'Activer le mod tout seul quand le jeu est lancé'; state = 'État'
-    coco = 'Voir mon ami en Coco (pris en compte à la prochaine activation du mod)'
+    coco = 'Voir mon ami en Coco (désactivé : faisait planter aux changements de niveau)'
     copy = 'Copier mon SteamID'; logs = 'Ouvrir le dossier (journaux)'; langBtn = 'English'
     gameOn = '● Jeu : lancé'; gameOff = '○ Jeu : pas lancé'
     modOn = '● Mod : actif'; modStarting = '◐ Mod : démarrage...'; modErr = '✖ Mod : erreur ({0})'; modOff = '○ Mod : inactif'
@@ -37,7 +37,7 @@ $S = @{
     peerLbl = "Your friend's SteamID64 (or their Steam profile link):"
     game = '1. Start the game'; mod = '2. Enable the mod'; stop = 'Stop the mod'
     auto = 'Enable the mod automatically when the game starts'; state = 'Status'
-    coco = 'Show my friend as Coco (applies the next time the mod is enabled)'
+    coco = 'Show my friend as Coco (disabled: crashed on level changes)'
     copy = 'Copy my SteamID'; logs = 'Open folder (logs)'; langBtn = 'Français'
     gameOn = '● Game: running'; gameOff = '○ Game: not running'
     modOn = '● Mod: active'; modStarting = '◐ Mod: starting...'; modErr = '✖ Mod: error ({0})'; modOff = '○ Mod: inactive'
@@ -63,7 +63,8 @@ $script:userStopped = $false   # l'utilisateur a cliqué "Arrêter" : le mode au
 $script:lastRx = -1; $script:rxGrowing = $false; $script:mySteamId = ''
 $script:infoKey = $null; $script:infoColor = $null   # dernier message d'info (re-traduit si on change de langue)
 
-function Get-Game { Get-Process $gameName -ErrorAction SilentlyContinue | Select-Object -First 1 }
+# only the game installed by Steam (the mod supports the Steam build only; copies elsewhere, e.g. test copies, are ignored)
+function Get-Game { Get-Process $gameName -ErrorAction SilentlyContinue | Where-Object { $_.Path -match '\\steamapps\\' } | Select-Object -First 1 }
 
 function Parse-Peer([string]$s) {
     # accepte le SteamID64 seul ou un lien de profil steamcommunity.com/profiles/7656119...
@@ -126,7 +127,8 @@ $btnStop = Add-Ctl (New-Object Windows.Forms.Button) 308 110 136 34
 $chkAuto = Add-Ctl (New-Object Windows.Forms.CheckBox) 16 152 428 22; $chkAuto.Checked = $true
 # coop.coco next to the dll = the mod shows the friend as Coco (read when the mod starts)
 $cocoFile = Join-Path $here 'coop.coco'
-$chkCoco = Add-Ctl (New-Object Windows.Forms.CheckBox) 16 176 428 22; $chkCoco.Checked = (Test-Path $cocoFile)
+$chkCoco = Add-Ctl (New-Object Windows.Forms.CheckBox) 16 176 428 22; $chkCoco.Checked = $false; $chkCoco.Enabled = $false
+Remove-Item $cocoFile -ErrorAction SilentlyContinue   # v16: showing a Crash friend as Coco crashed the game on level changes
 $chkCoco.Add_CheckedChanged({ if ($chkCoco.Checked) { New-Item $cocoFile -ItemType File -Force | Out-Null } else { Remove-Item $cocoFile -ErrorAction SilentlyContinue } })
 
 $grp = Add-Ctl (New-Object Windows.Forms.GroupBox) 16 206 428 164

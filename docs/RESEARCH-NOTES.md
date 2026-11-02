@@ -647,3 +647,25 @@ Not done: translating events by name for Coco; Crash 2 and Crash 3; level change
   100% save shows "CHANGER DE HEROS" on the Crash 1 map). B saw A as Coco with replayed events (158, 163...): running,
   jumping, spinning, alive. A saw B as Crash.
 - Side note: loading a 100% save in a test copy unlocks Steam achievements on the account running it.
+
+### Crash on level changes with a second hero pack: mod v16 (2026-11-02)
+
+Observed:
+- The owner's real game crashed twice with v14 and "show my friend as Coco" on, at exe+0x768E00 (20:31) and
+  exe+0x375832 (20:37). The offsets come from the Windows Application log, event 1000.
+- Reproduced in the lab: with Coco's pack loaded next to Crash in pool 92, going back to the map and entering a level
+  again crashed the game itself at exe+0x768E00, while it spawned the PLAYER hero (stack 0xDE22EB 0x768CAE 0xCB715B
+  0x74CBAD 0x494310 0xC06D68 0x4D758D 0xC06E93 0x5046E4 0x4D0540), before the mod did anything in the new level.
+- Asking for the pack again in each level, and waiting 3 s before the prototype search, did not prevent it. Note: the
+  player actor keeps the same address from one level to the next, so anything keyed "per actor" is not per level.
+- With cross-hero pack loading disabled: three map <-> level round trips on both copies, no crash, and the puppet
+  respawned each time.
+
+Mod v16: the puppet only uses our own hero. A friend who plays the same hero gets full animations; otherwise they
+appear as our hero, driven by their buttons only. Cross-hero loading stays behind a `coop.experimental` file, for
+research. Open question: how to drop the extra request from the loader's cache ([exe+0x1A61C88]+0x18, keyed by name
+and pool) before a level change.
+
+Lab mishap: the owner's launcher was open and auto-enabled the release mod inside the test copies, and that
+overwrote coop-me.log. Since v16, the launcher and coop.ps1 only take a game under `\steamapps\`, and the mod keeps the
+previous log as coop-<name>.prev.log.
