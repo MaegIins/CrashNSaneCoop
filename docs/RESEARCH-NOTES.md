@@ -669,3 +669,18 @@ and pool) before a level change.
 Lab mishap: the owner's launcher was open and auto-enabled the release mod inside the test copies, and that
 overwrote coop-me.log. Since v16, the launcher and coop.ps1 only take a game under `\steamapps\`, and the mod keeps the
 previous log as coop-<name>.prev.log.
+
+### Deaths and falls: mod v17 (2026-11-02, two test copies)
+
+Observed (A dropped below N. Sanity Beach and died):
+- A's game rebuilt all crates at once (45, then 4 more): the "more than 3 at once = reload, not sent" guard held,
+  and no false crate break reached B.
+- Crates A broke before dying stay broken in B, and come back in A. If A breaks them again, B logs "none here".
+  Harmless.
+- In B, the puppet followed A below the level and was destroyed by the kill plane ("puppet gone"), then was respawned.
+  That is the path of the 18:38 crash (exe+0xDDE1D0).
+
+Mod v17: when the friend falls more than 400 units below their highest point of the last 1.5 s, the puppet is parked
+above the level. It comes back when they are up again, or when they reappear more than 600 units away horizontally (a
+respawn elsewhere). Lab: B logged "friend falling: puppet parked above the level" then "back on their feet"; there
+was no "puppet gone".

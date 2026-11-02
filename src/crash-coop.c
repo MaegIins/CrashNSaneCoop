@@ -570,7 +570,7 @@ static DWORD WINAPI worker(LPVOID arg) {
     g_session = (GetTickCount() * 2654435761u) ^ (GetCurrentProcessId() << 16) ^ (unsigned)(DWORD64)&g_cs;
     { char cp[MAX_PATH]; sprintf(cp, "%scoop.coco", g_dir); g_wantCoco = GetFileAttributesA(cp) != INVALID_FILE_ATTRIBUTES;
       sprintf(cp, "%scoop.experimental", g_dir); g_experimental = GetFileAttributesA(cp) != INVALID_FILE_ATTRIBUTES; }
-    { char lv[128]; level_hash(lv, sizeof lv); fprintf(g_log, "mod v16 (packet v8)%s, session %08X, level now '%s'\n", g_wantCoco ? ", friend shown as Coco" : "", g_session, lv); fflush(g_log); }
+    { char lv[128]; level_hash(lv, sizeof lv); fprintf(g_log, "mod v17 (packet v8)%s, session %08X, level now '%s'\n", g_wantCoco ? ", friend shown as Coco" : "", g_session, lv); fflush(g_log); }
 
     DWORD rxTid = 0;
     if (!strcmp(mode, "steam") || !strcmp(mode, "steamprobe")) {
@@ -773,6 +773,25 @@ static DWORD WINAPI worker(LPVOID arg) {
             // friend absent: park the puppet far ABOVE the level. Parking it below (v11) made the game's kill plane
             // destroy it; in a real game (2026-11-02) a second such destruction crashed the game at exe+0xDDE1D0
             // (null component during the entity teardown, stack 0xE01AAB 0xDF3998 0xDDDE4B).
+            // friend falling into a pit (or dying below the level): don't follow them into the kill plane, which
+            // destroys the puppet (lab 2026-11-02: friend dropped below the level -> "puppet gone"; the 18:38 crash
+            // came after such destructions). Falling = more than 400 units below their highest point of the last
+            // 1.5 s; the puppet is parked above the level until they are back up (respawn, landing).
+            {
+                static float zHist[64], fallTop; static DWORD tHist[64], lastSample; static int hHead; static int falling;
+                DWORD tn = GetTickCount(); float zmax = cur.pos[2];
+                if (tn - lastSample >= 50) { lastSample = tn; zHist[hHead & 63] = cur.pos[2]; tHist[hHead & 63] = tn; hHead++; }   // 64 x 50 ms
+                for (int k = 0; k < 64; k++) if (tHist[k] && tn - tHist[k] < 1500 && zHist[k] > zmax) zmax = zHist[k];
+                int fall = show && cur.pos[2] < zmax - 400.0f;
+                static float fallX, fallY;
+                if (falling && !fall && show && cur.pos[2] < fallTop - 400.0f) {   // still down there: stay hidden,
+                    float dx = cur.pos[0] - fallX, dy = cur.pos[1] - fallY;          // unless they respawned elsewhere
+                    if (dx * dx + dy * dy < 600.0f * 600.0f) fall = 1;
+                }
+                if (fall && !falling) { fallTop = zmax; fallX = cur.pos[0]; fallY = cur.pos[1]; }
+                if (fall != falling) { falling = fall; fprintf(g_log, "friend %s\n", fall ? "falling: puppet parked above the level" : "back on their feet"); fflush(g_log); }
+                if (fall) show = 0;
+            }
             if (!show) { q.pos[0] = 0; q.pos[1] = 0; q.pos[2] = 100000.0f; memset(q.input, 0, sizeof q.input); }
             write_input(rd(pup + 0x1A8), q.input);   // the friend's buttons + stick (the run cycle needs the stick)
             if (show != g_shown) { fprintf(g_log, "friend %s\n", show ? "visible" : "hidden (absent or other level)"); fflush(g_log); g_shown = show; }

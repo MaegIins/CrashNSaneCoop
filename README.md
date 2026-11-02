@@ -19,7 +19,8 @@ peer-to-peer through the game's own Steam connection: no server, no port to open
 | Both players on the same hero (Crash/Crash or Coco/Coco): the friend appears with that hero and all animations | works (Coco/Coco: Crash 1 lab test) |
 | Friend on another hero than you (e.g. they play Coco, you play Crash) | shown with **your** hero, moved by their buttons only (loading the other hero crashed the game on level changes, v14/v15) |
 | Crash 2 | the friend appears, but some animations do not map |
-| Deaths, checkpoints, level end | not handled |
+| Deaths and falls | the friend's puppet hides while they fall into a pit and comes back when they respawn; crates restored by a death are not re-sent |
+| Checkpoints, level end | not synced (each player has their own) |
 | More than 2 players | no |
 
 QA level: **manual** (real two-player sessions over Steam for presence and animations; lab tests with two copies
