@@ -10,3 +10,4 @@ coop.nowrite
 coop.noevents
 crashcoop-ami.txt
 crashcoop-lang.txt
+*.zip

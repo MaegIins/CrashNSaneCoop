@@ -74,6 +74,8 @@ or run `build.ps1`, which builds into `dist/` and copies the launcher next to it
 All the reverse-engineering notes (addresses, what was tried, what failed) are in
 [docs/RESEARCH-NOTES.md](docs/RESEARCH-NOTES.md).
 
+License: MIT (see [LICENSE](LICENSE)).
+
 This project started from the [coop-anything](https://github.com/cranebeaker/coop-anything) playbook. No game files
 are included in this repository.
 
