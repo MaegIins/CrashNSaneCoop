@@ -8,4 +8,4 @@ $mgr = [JO]::Q($h, $b + 0x1A665E8); $act = [JO]::Q($h, [JO]::Q($h, [JO]::Q($h, [
 $pos = [BitConverter]::GetBytes([single]$X) + [BitConverter]::GetBytes([single]$Y) + [BitConverter]::GetBytes([single]($Z + 120)); $w = [IntPtr]0
 for ($i = 0; $i -lt 3; $i++) { [JO]::WriteProcessMemory($h, [IntPtr]($act + 0x20), $pos, [IntPtr]12, [ref]$w) | Out-Null
   $f = [BitConverter]::GetBytes(([uint32]([JO]::Q($h, $act + 0x38) -band 0xFFFFFFFF)) -bor 0x400); [JO]::WriteProcessMemory($h, [IntPtr]($act + 0x38), $f, [IntPtr]4, [ref]$w) | Out-Null; Start-Sleep -Milliseconds 20 }
-Start-Sleep 2; $env:GAMECTL_INST = $Inst; & "$root\scripts\gamectl.ps1" key Space 120 1 | Out-Null
+Start-Sleep 2; $env:GAMECTL_INST = $Inst; $gc = "$PSScriptRoot\gamectl.ps1"; & $gc key Space 120 1 | Out-Null; Start-Sleep -Milliseconds 1200; & $gc key Space 120 1 | Out-Null   # a second jump in case the first press was not taken

@@ -11,6 +11,7 @@
 param([string]$Dll = "", [switch]$KeepRunning,
       [string]$Level = 'crash1/l101_nsanitybeach/l101_nsanitybeach',   # any level, entered with the game's "loadmap" console command
       [string]$CrateA = '-8.2,-142.1,-46.2', [string]$CrateB = '-4.9,121.6,-67.2;148,-53.8,-56.8',   # A breaks CrateA; B breaks CrateB crates (x,y,z;x,y,z) until its fruit counter is found
+      [string]$Checkpoint = '-14.6,7374.6,2074.5',   # a checkpoint crate of the level ('none' = skip check 6)
       [string]$LoadmapDll = "")
 $ErrorActionPreference = 'Stop'
 $root = if ($env:CRASHCOOP_LAB) { $env:CRASHCOOP_LAB } else { Join-Path (Split-Path -Parent $PSScriptRoot) 'lab' }
@@ -79,6 +80,8 @@ foreach ($i in 'A', 'B') {
         try {
         & $g key Enter | Out-Null; Start-Sleep 10; & $g key Enter | Out-Null; Start-Sleep 4
         & $g click 480 475 | Out-Null; Start-Sleep 8                                                    # main menu
+        & $g click 200 410 | Out-Null; Start-Sleep 3; & $g click 203 339 | Out-Null; Start-Sleep 15     # Crash 1 > Continue: the map
+        # loadmap from the main menu crashed the game twice at exe+0x75BBE8 after the hero loaded; from the map it works
         LoadLevel $i; Start-Sleep 25
         } catch { "  setup $i try ${try}: $_"; continue }
         if ((GameLog $i | Select-String "Loaded chunk '${short}:GlobalChunk'")) { break }
@@ -111,13 +114,13 @@ Check '3 fruit: B found its own counter (precondition)' $ok '' | Write-Output
 # 2 crate (the first crate of the level)
 $rx = CrateRx $ca
 & "$PSScriptRoot\jumpon.ps1" -Inst A -X $ca[0] -Y $ca[1] -Z $ca[2]
-$sent = WaitFor 'sent' { ModLog 'A' | Select-String "crate broken here at $rx" } 15
+$sent = WaitFor 'sent' { ModLog 'A' | Select-String "crate (broken|hit) here at $rx" } 15
 Check '2 crate: A detected its own break and sent it' $sent '' | Write-Output
-$repl = WaitFor 'replayed' { ModLog 'B' | Select-String "friend broke the crate at ${rx}: breaking ours" } 15
+$repl = WaitFor 'replayed' { ModLog 'B' | Select-String "friend hit the crate at ${rx}: hitting ours" } 15
 Check '2 crate: B found its copy of the crate and broke it' $repl '' | Write-Output
-$gone = WaitFor 'gone' { -not (ModLog 'B' | Select-String "friend broke a crate at $rx") } 1
+$gone = WaitFor 'gone' { -not (ModLog 'B' | Select-String "friend hit a crate at $rx") } 1
 Check '2 crate: B did not report it missing' $gone '' | Write-Output
-$echo = -not (ModLog 'B' | Select-String "crate broken here at $rx")
+$echo = -not (ModLog 'B' | Select-String "crate (broken|hit) here at $rx")
 Check '2 crate: B did not send the crate back as its own' $echo '' | Write-Output
 
 # 3 fruit
@@ -140,6 +143,29 @@ $hub = WaitFor 'reload' { (LevelLoads 'A') -gt $before } 30
 $respawn = WaitFor 'respawn' { @(ModLog 'A' | Select-String 'spawn state 3 puppet 0x[1-9A-F]').Count -ge 2 } 60
 Check '5 level: A loaded the level again (precondition)' $hub '' | Write-Output
 Check '5 level: A back in the level, puppet spawned again' $respawn '' | Write-Output
+# 6 checkpoint: A opens a checkpoint crate; B's copy must open too, so B respawns there after a death
+if ($Checkpoint -and $Checkpoint -ne 'none') {
+    $cpv = @($Checkpoint -split ',' | % { [double]::Parse($_, $ic) }); $cprx = CrateRx $cpv
+    # after the reload of check 5, A's crate list must be rebuilt first (a crate scan logged after the last player change)
+    $scanned = WaitFor 'A rescan' { $l = @(ModLog 'A'); $ip = ($l | Select-String 'player changed' | Select-Object -Last 1).LineNumber; $is = ($l | Select-String 'crate scan' | Select-Object -Last 1).LineNumber; $is -gt $ip } 40
+    Check '6 checkpoint: A crate list rebuilt after the reload (precondition)' $scanned '' | Write-Output
+    $sentCp = $false   # a jump can miss (landing during a respawn): jump again, up to 3 times, as a player would
+    for ($j = 0; $j -lt 3 -and -not $sentCp; $j++) { & "$PSScriptRoot\jumpon.ps1" -Inst A -X $cpv[0] -Y $cpv[1] -Z $cpv[2]
+        $sentCp = WaitFor 'cp sent' { ModLog 'A' | Select-String "crate (broken|hit) here at $cprx" } 15 }
+    if (-not $sentCp) {   # the jump key is sometimes not taken while standing on the crate: hit it through the mod's test hook
+        [string]::Format($ic, '{0} {1} {2}', $cpv[0], $cpv[1], $cpv[2]) | Set-Content "$modDir\coop-A.hit"
+        $sentCp = WaitFor 'cp sent' { ModLog 'A' | Select-String "crate (broken|hit) here at $cprx" } 15 }
+    $replCp = WaitFor 'cp replayed' { ModLog 'B' | Select-String "friend hit the crate at ${cprx}: hitting ours" } 30
+    Check '6 checkpoint: A sent the checkpoint crate (precondition)' $sentCp '' | Write-Output
+    Check '6 checkpoint: B opened its checkpoint crate' $replCp '' | Write-Output
+    Start-Sleep 3; Teleport 'B' $cpv[0] ($cpv[1] - 300) ($cpv[2] - 3000)   # B dies far below the checkpoint
+    Start-Sleep 12
+    $pb = Player 'B'; $bpos = [byte[]]::new(12); $rr = [IntPtr]0; [ST]::ReadProcessMemory($pb.H, [IntPtr]($pb.A + 0x20), $bpos, [IntPtr]12, [ref]$rr) | Out-Null
+    $by = [BitConverter]::ToSingle($bpos, 4); $bz = [BitConverter]::ToSingle($bpos, 8)
+    # meaningful only if B's checkpoint was opened before the death (replCp) and B really died (a reload logged)
+    $died = [bool](ModLog 'B' | Select-String 'crates vanished at once')
+    Check '6 checkpoint: B respawned at the checkpoint, not at the level start' ($replCp -and $died -and [Math]::Abs($by - $cpv[1]) -lt 800 -and $bz -gt $cpv[2] - 1000) ('B y {0:N0} z {1:N0}, checkpoint y {2:N0}' -f $by, $bz, $cpv[1]) | Write-Output
+}
 # invariants, sampled three times a few seconds apart
 $inv = $true
 for ($s = 0; $s -lt 3; $s++) {
@@ -153,8 +179,10 @@ for ($s = 0; $s -lt 3; $s++) {
 Check 'invariants: both games alive, no FAULT, no error dialog' $inv '' | Write-Output
 
 } catch { "error: $_"; Check 'suite ran to the end' $false "$_" | Write-Output }
+# on a failure, keep a screenshot of both games next to the logs (what was on screen is often the explanation)
+if (@($results | Where-Object { -not $_.Ok }).Count) { foreach ($i in 'A', 'B') { if (Alive $i) { $env:GAMECTL_INST = $i; try { & $g shot "suite-fail-$i" | Write-Output } catch {} } } }
 if (-not $KeepRunning) { New-Item "$modDir\coop.stop" -ItemType File -Force | Out-Null; Start-Sleep 3; Remove-Item "$modDir\coop.stop"; foreach ($i in 'A', 'B') { $env:GAMECTL_INST = $i; & $g stop | Out-Null } }
-$expected = 15
+$expected = if ($Checkpoint -and $Checkpoint -ne 'none') { 19 } else { 15 }
 $r = Score $results $expected
 "{0}/{1} checks passed" -f @($results | Where-Object Ok).Count, $expected
 "RESULT: $r"

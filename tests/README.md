@@ -11,6 +11,7 @@ and checks what player B's game and both mod logs report. Nobody needs to play.
 | 3 | B breaks crates until its fruit counter is found (precondition), then gets the fruit A picks up |
 | 4 | A drops below the level: B parks the puppet, shows it again after the respawn, and the puppet is never destroyed |
 | 5 | A loads the level again (precondition: the game logged a new load): the puppet is spawned again |
+| 6 | (with `-Checkpoint x,y,z`) A opens a checkpoint crate, B's opens too, B dies and respawns at the checkpoint |
 | invariants | sampled 3 times: both games alive, no FAULT line in the mod logs, no Windows error dialog |
 
 A scorer self-test runs first. A check that never ran counts as a failure. The last line is `RESULT: PASS` or
@@ -30,12 +31,12 @@ Then run `powershell -ExecutionPolicy Bypass -File tests\suite.ps1` (about 8 min
 
 ```
 # Crash 2, Turtle Woods
-tests\suite.ps1 -Level crash2/l201_turtlewoods/l201_turtlewoods -CrateA '16.1,1114.0,-208.2' -CrateB '464.0,3455.0,460.0;464.0,3455.0,146.0'
+tests\suite.ps1 -Level crash2/l201_turtlewoods/l201_turtlewoods -CrateA '16.1,1114.0,-208.2' -CrateB '464.0,3455.0,460.0;464.0,3455.0,146.0' -Checkpoint none
 # Crash 3, Toad Village
-tests\suite.ps1 -Level crash3/l301_toadvillage/l301_toadvillage -CrateA '-92.9,16.0,84.9' -CrateB '-171.9,-221.0,84.0;-65.8,1382.3,79.6'
+tests\suite.ps1 -Level crash3/l301_toadvillage/l301_toadvillage -CrateA '-92.9,16.0,84.9' -CrateB '-171.9,-221.0,84.0;-65.8,1382.3,79.6' -Checkpoint none
 ```
 
-Last results (v18): Crash 1 N. Sanity Beach 15/15, Crash 2 Turtle Woods 15/15, Crash 3 Toad Village 15/15.
+Last results (v19): Crash 1 N. Sanity Beach 19/19 (with the checkpoint check), Crash 2 Turtle Woods 15/15, Crash 3 Toad Village 15/15 (`-Checkpoint none`).
 
 Windows A and B open side
 by side on the left and right halves of the screen; leave them visible, because keys and clicks are sent to them.

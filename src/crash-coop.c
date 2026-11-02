@@ -103,14 +103,21 @@ static FILE *g_log;
 #define DAMAGE_RVA 0x4D63A0
 #define MAXCR 1024
 static CRITICAL_SECTION g_crCs;
-static DWORD64 g_crComp[MAXCR]; static float g_crP[MAXCR][3]; static int g_crN; static volatile DWORD64 g_bounceDef;
+static DWORD64 g_crComp[MAXCR]; static float g_crP[MAXCR][3]; static int g_crStage[MAXCR]; static int g_crN; static volatile DWORD64 g_bounceDef;
 static volatile LONG g_myCrHead; static float g_myCr[256][3];          /* crates we broke (sent) */
 static volatile LONG g_inCrHead, g_inCrTail; static float g_inCr[64][3]; static unsigned g_inCrLevel[64];
 static volatile DWORD64 g_hitDef, g_hitAtt, g_hitTgt, g_hitComp; static volatile LONG g_hitReq;   /* 1 = to do, 2 = done */
 static volatile LONG g_crSent, g_crRemote, g_crMiss;
 // spots already sent, or broken for the friend: never sent (again). A rescan could re-list a crate we had just hit for
 // the friend before the game freed it, and it was then sent back as ours (seen by the automated suite, 2026-11-02).
-static float sentP[32][3]; static int sentN;
+static float sentP[32][3]; static DWORD sentT[32]; static int sentN;
+// Crates hit for the friend in the last seconds: their own stage change / disappearance is not sent back (echo).
+static float remP[32][3]; static DWORD remT[32]; static int remN;
+static int near_recent(float (*P)[3], DWORD *T, int n, const float *c, DWORD ms) {
+    DWORD now = GetTickCount();
+    for (int s = 0; s < n && s < 32; s++) { float ex = P[s][0] - c[0], ey = P[s][1] - c[1], ez = P[s][2] - c[2]; if (ex * ex + ey * ey + ez * ez < 25.0f && now - T[s] < ms) return 1; }
+    return 0;
+}
 
 // --- Coco puppet (v14) ------------------------------------------------------------------------------------------------
 // With a file coop.coco next to the dll, the friend's puppet is Coco. Coco's hero pack is not loaded while we play
@@ -211,7 +218,7 @@ static DWORD64 find_prototype(void) {
 // one memory pass: every live crate (component + its entity position) and one "bounce" CDamageData
 static volatile DWORD64 g_scanFor; static volatile LONG g_scanReq;
 static DWORD WINAPI crate_scanner(LPVOID arg) {
-    (void)arg; static unsigned char chunk[1 << 20]; static DWORD64 comps[MAXCR]; static float pos[MAXCR][3]; static DWORD64 gvs[MAXGV];
+    (void)arg; static unsigned char chunk[1 << 20]; static DWORD64 comps[MAXCR]; static float pos[MAXCR][3]; static int stg[MAXCR]; static DWORD64 gvs[MAXGV];
     while (!stop_requested()) {
         if (!g_scanReq) { Sleep(50); continue; }
         DWORD64 forActor = g_scanFor, dvt = g_base + DESTR_VT, ddv = g_base + DDATA_VT, gvv = g_base + GVV_VT, def = 0, a = 0x10000; int n = 0, ng = 0;
@@ -230,7 +237,7 @@ static DWORD WINAPI crate_scanner(LPVOID arg) {
                         DWORD64 me = b + off + i, e = rd(me + 0x18), cl = e ? rd(e + 0x18) : 0, arr = cl ? rd(cl + 0x20) : 0; float p[3]; int nc = 0, member = 0;
                         if (cl) safe_read(cl + 0x10, &nc, 4);
                         for (int k = 0; k < nc && k < 64 && arr; k++) if (rd(arr + 8 * k) == me) { member = 1; break; }
-                        if (member && safe_read(e + 0x20, p, 12) && (p[0] != 0 || p[1] != 0 || p[2] != 0)) { comps[n] = me; memcpy(pos[n], p, 12); n++; }
+                        if (member && safe_read(e + 0x20, p, 12) && (p[0] != 0 || p[1] != 0 || p[2] != 0)) { comps[n] = me; memcpy(pos[n], p, 12); stg[n] = 0; safe_read(me + 0x30, &stg[n], 4); n++; }
                     } else if (v == gvv && ng < MAXGV) {
                         gvs[ng++] = b + off + i;
                     } else if (v == ddv && !def) {
@@ -244,7 +251,7 @@ static DWORD WINAPI crate_scanner(LPVOID arg) {
         if (forActor == g_scanFor && forActor == player_actor()) {
             // a crate in the old list but missing from the new one broke during the scan: the detection pass of the
             // worker sees it first because it runs on the old list until this swap (small window, accepted)
-            memcpy(g_crComp, comps, n * sizeof comps[0]); memcpy(g_crP, pos, n * sizeof pos[0]); g_crN = n;
+            memcpy(g_crComp, comps, n * sizeof comps[0]); memcpy(g_crP, pos, n * sizeof pos[0]); memcpy(g_crStage, stg, n * sizeof stg[0]); g_crN = n;
             if (def) g_bounceDef = def;
             memcpy(g_gv, gvs, ng * sizeof gvs[0]); g_gvN = ng;
         }
@@ -585,7 +592,7 @@ static DWORD WINAPI worker(LPVOID arg) {
     g_session = (GetTickCount() * 2654435761u) ^ (GetCurrentProcessId() << 16) ^ (unsigned)(DWORD64)&g_cs;
     { char cp[MAX_PATH]; sprintf(cp, "%scoop.coco", g_dir); g_wantCoco = GetFileAttributesA(cp) != INVALID_FILE_ATTRIBUTES;
       sprintf(cp, "%scoop.experimental", g_dir); g_experimental = GetFileAttributesA(cp) != INVALID_FILE_ATTRIBUTES; }
-    { char lv[128]; level_hash(lv, sizeof lv); fprintf(g_log, "mod v18 (packet v8)%s, session %08X, level now '%s'\n", g_wantCoco ? ", friend shown as Coco" : "", g_session, lv); fflush(g_log); }
+    { char lv[128]; level_hash(lv, sizeof lv); fprintf(g_log, "mod v19 (packet v8)%s, session %08X, level now '%s'\n", g_wantCoco ? ", friend shown as Coco" : "", g_session, lv); fflush(g_log); }
 
     DWORD rxTid = 0;
     if (!strcmp(mode, "steam") || !strcmp(mode, "steamprobe")) {
@@ -686,17 +693,31 @@ static DWORD WINAPI worker(LPVOID arg) {
                 lastCrPoll = tn;
                 static int gone[MAXCR]; int ng = 0;
                 EnterCriticalSection(&g_crCs);
-                for (int i = 0; i < g_crN; i++) { DWORD64 vt = 0; if (!safe_read(g_crComp[i], &vt, 8) || vt != g_base + DESTR_VT) gone[ng++] = i; }
+                static int hit[MAXCR]; int nh = 0;
+                for (int i = 0; i < g_crN; i++) { DWORD64 vt = 0; int st = -1;
+                    if (!safe_read(g_crComp[i], &vt, 8) || vt != g_base + DESTR_VT) { gone[ng++] = i; continue; }
+                    // a crate that is hit but stays (checkpoint crate opening, bounce crate) moves its damage stage
+                    // (component +0x30, advanced by exe+0x468130): that hit is sent too
+                    if (safe_read(g_crComp[i] + 0x30, &st, 4) && st > g_crStage[i]) { g_crStage[i] = st; hit[nh++] = i; } }
+                if (nh > 0 && nh <= 3) {
+                    float me[3] = {0}; safe_read(now + 0x20, me, 12);
+                    for (int k = 0; k < nh; k++) { float *c = g_crP[hit[k]], dx = c[0] - me[0], dy = c[1] - me[1], dz = c[2] - me[2];
+                        if (near_recent(remP, remT, remN, c, 3000) || dx * dx + dy * dy + dz * dz > 600.0f * 600.0f) continue;
+                        LONG h = g_myCrHead; memcpy(g_myCr[h & 255], c, 12); g_myCrHead = h + 1; g_crSent++;
+                        sentT[sentN & 31] = GetTickCount(); memcpy(sentP[sentN++ & 31], c, 12);
+                        fprintf(g_log, "crate hit here at %.1f %.1f %.1f (sent)\n", c[0], c[1], c[2]); }
+                    fflush(g_log);
+                }
                 if (ng > 0 && ng <= 3) {
                     // only crates near our player count as broken by us: far ones vanish when the game unloads that part
                     // of the level (seen in the lab: a crate 6000 units away "broke"), and the same spot is sent once
                     float me[3] = {0}; safe_read(now + 0x20, me, 12);
                     for (int k = 0; k < ng; k++) {
                         float *c = g_crP[gone[k]], dx = c[0] - me[0], dy = c[1] - me[1], dz = c[2] - me[2]; int dup = 0;
-                        for (int s = 0; s < sentN && s < 32; s++) { float ex = sentP[s][0] - c[0], ey = sentP[s][1] - c[1], ez = sentP[s][2] - c[2]; if (ex * ex + ey * ey + ez * ez < 25.0f) dup = 1; }
+                        dup = near_recent(sentP, sentT, sentN, c, 1500) || near_recent(remP, remT, remN, c, 3000);
                         if (dup) continue;
                         if (dx * dx + dy * dy + dz * dz > 600.0f * 600.0f) { fprintf(g_log, "crate gone far away at %.1f %.1f %.1f (unloaded?), not sent\n", c[0], c[1], c[2]); continue; }
-                        memcpy(sentP[sentN++ & 31], c, 12);
+                        sentT[sentN & 31] = GetTickCount(); memcpy(sentP[sentN++ & 31], c, 12);
                         LONG h = g_myCrHead; memcpy(g_myCr[h & 255], c, 12); g_myCrHead = h + 1; g_crSent++;
                         fprintf(g_log, "crate broken here at %.1f %.1f %.1f (sent)\n", c[0], c[1], c[2]); }
                 } else if (ng > 3) {   // many at once = the game rebuilt them (death / checkpoint): not real breaks
@@ -708,6 +729,18 @@ static DWORD WINAPI worker(LPVOID arg) {
             }
             { static DWORD lastFruit; if (tn - lastFruit > 50) { lastFruit = tn; fruit_tick(now); } }
             if (g_hitReq == 2) g_hitReq = 0;
+            {   // test hook (automated suite): a file coop-<name>.hit "x y z" makes us hit our OWN crate there with the game's damage
+                // function, like a jump would; the normal detection then sends it. Nothing happens without the file.
+                static DWORD lastHitFile; char hp[MAX_PATH];
+                if (now && g_hitReq == 0 && tn - lastHitFile > 250) { lastHitFile = tn; sprintf(hp, "%scoop-%s.hit", g_dir, name); FILE *hf = fopen(hp, "r"); float hq[3];
+                    if (hf) { int ok = fscanf(hf, "%f %f %f", &hq[0], &hq[1], &hq[2]) == 3; fclose(hf); DeleteFileA(hp);
+                        int best = -1; float bd = 25.0f * 25.0f;
+                        EnterCriticalSection(&g_crCs);
+                        for (int i = 0; ok && i < g_crN; i++) { float dx = g_crP[i][0] - hq[0], dy = g_crP[i][1] - hq[1], dz = g_crP[i][2] - hq[2], d = dx * dx + dy * dy + dz * dz; if (d < bd) { bd = d; best = i; } }
+                        if (best >= 0 && g_bounceDef) { g_hitComp = g_crComp[best]; g_hitTgt = rd(g_hitComp + 0x18); g_hitDef = g_bounceDef; g_hitAtt = now; g_hitReq = 1; }
+                        LeaveCriticalSection(&g_crCs);
+                        fprintf(g_log, "test hook: hit our crate at %.1f %.1f %.1f -> %s\n", hq[0], hq[1], hq[2], best >= 0 ? "requested" : "no crate there"); fflush(g_log); } }
+            }
             if (now && g_hitReq == 0 && g_inCrTail != g_inCrHead) {
                 LONG t = g_inCrTail; float q[3]; memcpy(q, g_inCr[t & 63], 12);
                 if (g_inCrLevel[t & 63] != level_hash(NULL, 0)) g_inCrTail = t + 1;                  // friend's other level
@@ -718,10 +751,15 @@ static DWORD WINAPI worker(LPVOID arg) {
                     for (int i = 0; i < g_crN; i++) { float dx = g_crP[i][0] - q[0], dy = g_crP[i][1] - q[1], dz = g_crP[i][2] - q[2], d = dx * dx + dy * dy + dz * dz; if (d < bd) { bd = d; best = i; } }
                     if (best >= 0 && g_bounceDef) {
                         g_hitComp = g_crComp[best]; g_hitTgt = rd(g_hitComp + 0x18); g_hitDef = g_bounceDef; g_hitAtt = now;
-                        g_crN--; g_crComp[best] = g_crComp[g_crN]; memcpy(g_crP[best], g_crP[g_crN], 12);   // not "our" break
-                        g_hitReq = 1; g_crRemote++; g_lastRemoteHit = GetTickCount(); memcpy(sentP[sentN++ & 31], q, 12);
-                        fprintf(g_log, "friend broke the crate at %.1f %.1f %.1f: breaking ours\n", q[0], q[1], q[2]);
-                    } else { g_crMiss++; fprintf(g_log, "friend broke a crate at %.1f %.1f %.1f: none here (already broken?)\n", q[0], q[1], q[2]); }
+                        // the crate stays listed (a checkpoint or bounce crate survives a hit); what it does in the next 3 s
+                        // (stage change, disappearing) is ours to ignore, not to send back
+                        g_hitReq = 1; g_crRemote++; remT[remN & 31] = GetTickCount(); memcpy(remP[remN++ & 31], q, 12);
+                        {   // its fruit only reaches our player when we are close: only then are our next gains the friend's
+                            // (a 4 s window opened for any replayed crate swallowed our own fruit, seen by the suite in v19)
+                            float me[3] = {0}; safe_read(now + 0x20, me, 12); float dx = me[0] - q[0], dy = me[1] - q[1], dz = me[2] - q[2];
+                            if (dx * dx + dy * dy + dz * dz < 300.0f * 300.0f) g_lastRemoteHit = GetTickCount(); }
+                        fprintf(g_log, "friend hit the crate at %.1f %.1f %.1f: hitting ours\n", q[0], q[1], q[2]);
+                    } else { g_crMiss++; fprintf(g_log, "friend hit a crate at %.1f %.1f %.1f: none here (already broken?)\n", q[0], q[1], q[2]); }
                     LeaveCriticalSection(&g_crCs); fflush(g_log);
                     g_inCrTail = t + 1;
                 }

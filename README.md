@@ -20,11 +20,13 @@ peer-to-peer through the game's own Steam connection: no server, no port to open
 | Friend on another hero than you (e.g. they play Coco, you play Crash) | shown with **your** hero, moved by their buttons only (loading the other hero crashed the game on level changes, v14/v15) |
 | Crash 2 and Crash 3 | crates, fruit, falls and level reloads pass the same automated test as Crash 1 |
 | Deaths and falls | the friend's puppet hides while they fall into a pit and comes back when they respawn; crates restored by a death are not re-sent |
-| Checkpoints, level end | not synced (each player has their own) |
+| Checkpoints | a checkpoint one player opens opens for the other too (they respawn there) |
+| Multi-hit crates (bounce crates) | every hit is replayed |
+| Level end | not synced |
 | More than 2 players | no |
 
 QA: an automated two-client suite ([tests/](tests/README.md)) drives two copies of the game on one PC and checks presence,
-crate replay, fruit, falls and level changes, in any level (last runs with v18: Crash 1, 2 and 3, each 15/15 PASS). Presence and animations were also
+crate replay, fruit, falls and level changes, in any level (last runs with v19: Crash 1 19/19 with the checkpoint check, Crash 2 and 3 15/15). Presence and animations were also
 played over Steam by two people.
 
 Known issues:
