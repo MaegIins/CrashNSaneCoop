@@ -1,0 +1,12 @@
+dist/
+*.dll
+*.pdb
+*.lib
+*.log
+*.cfg
+coop.stop
+coop.coco
+coop.nowrite
+coop.noevents
+crashcoop-ami.txt
+crashcoop-lang.txt
