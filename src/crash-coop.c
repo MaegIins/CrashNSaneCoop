@@ -108,6 +108,9 @@ static volatile LONG g_myCrHead; static float g_myCr[256][3];          /* crates
 static volatile LONG g_inCrHead, g_inCrTail; static float g_inCr[64][3]; static unsigned g_inCrLevel[64];
 static volatile DWORD64 g_hitDef, g_hitAtt, g_hitTgt, g_hitComp; static volatile LONG g_hitReq;   /* 1 = to do, 2 = done */
 static volatile LONG g_crSent, g_crRemote, g_crMiss;
+// spots already sent, or broken for the friend: never sent (again). A rescan could re-list a crate we had just hit for
+// the friend before the game freed it, and it was then sent back as ours (seen by the automated suite, 2026-11-02).
+static float sentP[32][3]; static int sentN;
 
 // --- Coco puppet (v14) ------------------------------------------------------------------------------------------------
 // With a file coop.coco next to the dll, the friend's puppet is Coco. Coco's hero pack is not loaded while we play
@@ -116,7 +119,7 @@ static volatile LONG g_crSent, g_crRemote, g_crMiss;
 // no memory without a real second player). The game logs "Loaded chunk 'coco:Hero_Crash_data_92'" and an inert "Coco"
 // CActor appears next to Crash's; the puppet is cloned from it. Asked again in every level (the hero pool is reloaded
 // on level changes). The request's reference is kept, never released.
-static volatile LONG g_cocoReq; static volatile DWORD64 g_cocoReqObj; static int g_wantCoco;
+static volatile LONG g_cocoReq, g_cacheOut; static volatile DWORD64 g_cocoReqObj; static int g_wantCoco;
 // Replaying Crash's behavior event ids on the Coco puppet made it shatter and vanish (lab, 2026-11-02: events 82 87 83,
 // a jump): Coco's graph numbers its events differently. Until events are translated by name, the Coco puppet gets no
 // events and animates from the friend's buttons only (it then runs and jumps and stays alive).
@@ -288,12 +291,24 @@ static LONG CALLBACK veh(PEXCEPTION_POINTERS ep) {
     if ((c->Dr6 & 8) && c->Rip == g_base + SYNC_RVA) {          // per-character behavior sync: replay events on the puppet
         c->Dr6 = 0; c->EFlags |= 0x10000; g_curBC = c->Rcx;
         if (g_cocoReq == 1) {  // load the Coco hero pack next to Crash (see "Coco puppet" below)
-            DWORD64 s = 0, req = 0; g_cocoReq = 2;
+            DWORD64 s = 0, req = 0;
             ((void (*)(DWORD64 *, const char *))(g_base + 0xDCE380))(&s, g_packName);
             DWORD64 pool = ((DWORD64 (*)(unsigned))(g_base + 0xDF0AD0))(92);
             DWORD64 loader = rd(g_base + 0x1A61C88);
             if (s && pool && loader) ((DWORD64 * (*)(DWORD64, DWORD64 *, DWORD64, DWORD64, int))(g_base + 0x4EBDB0))(loader, &req, s, pool, 1);
-            g_cocoReqObj = req;
+            g_cocoReqObj = req; g_cacheOut = 0;
+            // Experimental: take our request out of the loader's cache ([loader+0x18], key = exe+0xE45910(&pool, 8,
+            // exe+0xE556E0(name, 0x811C9DC5)), the same key 0x4EBDB0 builds). Idea: after a level change that entry
+            // pointed into the reset pool and the next hero load crashed at exe+0x768E00. We keep our own reference.
+            if (g_experimental && req && loader) {
+                DWORD64 table = rd(loader + 0x18), poolv = pool, *found = 0;
+                unsigned hn = ((unsigned (*)(DWORD64, unsigned))(g_base + 0xE556E0))(s, 0x811C9DC5u);
+                unsigned key = ((unsigned (*)(void *, int, unsigned))(g_base + 0xE45910))(&poolv, 8, hn);
+                char hit = table ? ((char (*)(DWORD64, void *, unsigned, DWORD64 **))(g_base + 0xDF5A10))(table, &key, key, &found) : 0;
+                if (hit && found && *found == req) { ((DWORD64 (*)(DWORD64, void *, unsigned))(g_base + 0xE03250))(table, &key, key); g_cacheOut = 1; }
+                else g_cacheOut = hit ? 2 : 3;   /* 2 = other value under that key, 3 = key not found */
+            }
+            g_cocoReq = 2;   // last: the worker reads g_cocoReqObj once it sees 2
         }
         if (g_hitReq == 1) {   // a crate the friend broke: hit it here, on the game thread, like a jump would
             DWORD64 vt = 0; g_hitReq = 2;
@@ -570,7 +585,7 @@ static DWORD WINAPI worker(LPVOID arg) {
     g_session = (GetTickCount() * 2654435761u) ^ (GetCurrentProcessId() << 16) ^ (unsigned)(DWORD64)&g_cs;
     { char cp[MAX_PATH]; sprintf(cp, "%scoop.coco", g_dir); g_wantCoco = GetFileAttributesA(cp) != INVALID_FILE_ATTRIBUTES;
       sprintf(cp, "%scoop.experimental", g_dir); g_experimental = GetFileAttributesA(cp) != INVALID_FILE_ATTRIBUTES; }
-    { char lv[128]; level_hash(lv, sizeof lv); fprintf(g_log, "mod v17 (packet v8)%s, session %08X, level now '%s'\n", g_wantCoco ? ", friend shown as Coco" : "", g_session, lv); fflush(g_log); }
+    { char lv[128]; level_hash(lv, sizeof lv); fprintf(g_log, "mod v18 (packet v8)%s, session %08X, level now '%s'\n", g_wantCoco ? ", friend shown as Coco" : "", g_session, lv); fflush(g_log); }
 
     DWORD rxTid = 0;
     if (!strcmp(mode, "steam") || !strcmp(mode, "steamprobe")) {
@@ -637,7 +652,7 @@ static DWORD WINAPI worker(LPVOID arg) {
                 if (packGen != levelGen || strcmp(packName, want)) {
                     packGen = levelGen; strcpy(packName, want); strcpy(g_packName, want);
                     g_cocoReq = 1; for (int i = 0; i < 100 && g_cocoReq != 2; i++) Sleep(10);
-                    fprintf(g_log, "hero: %s pack requested (request 0x%llX)\n", want, g_cocoReqObj); fflush(g_log);
+                    fprintf(g_log, "hero: %s pack requested (request 0x%llX, cache removal %ld)\n", want, g_cocoReqObj, g_cacheOut); fflush(g_log);
                     // let it load (0.5-0.8 s in the game log) before looking: until then the previous level's copy of
                     // the prototype may still sit, freed, at the same place
                     Sleep(3000);
@@ -676,7 +691,6 @@ static DWORD WINAPI worker(LPVOID arg) {
                     // only crates near our player count as broken by us: far ones vanish when the game unloads that part
                     // of the level (seen in the lab: a crate 6000 units away "broke"), and the same spot is sent once
                     float me[3] = {0}; safe_read(now + 0x20, me, 12);
-                    static float sentP[32][3]; static int sentN;
                     for (int k = 0; k < ng; k++) {
                         float *c = g_crP[gone[k]], dx = c[0] - me[0], dy = c[1] - me[1], dz = c[2] - me[2]; int dup = 0;
                         for (int s = 0; s < sentN && s < 32; s++) { float ex = sentP[s][0] - c[0], ey = sentP[s][1] - c[1], ez = sentP[s][2] - c[2]; if (ex * ex + ey * ey + ez * ez < 25.0f) dup = 1; }
@@ -705,7 +719,7 @@ static DWORD WINAPI worker(LPVOID arg) {
                     if (best >= 0 && g_bounceDef) {
                         g_hitComp = g_crComp[best]; g_hitTgt = rd(g_hitComp + 0x18); g_hitDef = g_bounceDef; g_hitAtt = now;
                         g_crN--; g_crComp[best] = g_crComp[g_crN]; memcpy(g_crP[best], g_crP[g_crN], 12);   // not "our" break
-                        g_hitReq = 1; g_crRemote++; g_lastRemoteHit = GetTickCount();
+                        g_hitReq = 1; g_crRemote++; g_lastRemoteHit = GetTickCount(); memcpy(sentP[sentN++ & 31], q, 12);
                         fprintf(g_log, "friend broke the crate at %.1f %.1f %.1f: breaking ours\n", q[0], q[1], q[2]);
                     } else { g_crMiss++; fprintf(g_log, "friend broke a crate at %.1f %.1f %.1f: none here (already broken?)\n", q[0], q[1], q[2]); }
                     LeaveCriticalSection(&g_crCs); fflush(g_log);

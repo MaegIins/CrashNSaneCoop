@@ -23,8 +23,9 @@ peer-to-peer through the game's own Steam connection: no server, no port to open
 | Checkpoints, level end | not synced (each player has their own) |
 | More than 2 players | no |
 
-QA level: **manual** (real two-player sessions over Steam for presence and animations; lab tests with two copies
-of the game on one PC for crates, fruit and Coco). No automated test suite yet.
+QA: an automated two-client suite ([tests/](tests/README.md)) drives two copies of the game on one PC and checks presence,
+crate replay, fruit, falls and level changes (last full run: 15/15, RESULT: PASS). Presence and animations were also
+played over Steam by two people.
 
 Known issues:
 - Characters slide a bit while running.

@@ -684,3 +684,19 @@ Mod v17: when the friend falls more than 400 units below their highest point of 
 above the level. It comes back when they are up again, or when they reappear more than 600 units away horizontally (a
 respawn elsewhere). Lab: B logged "friend falling: puppet parked above the level" then "back on their feet"; there
 was no "puppet gone".
+
+### Automated two-client suite, and a disproved Coco idea (2026-11-02)
+
+- `scripts/suite.ps1` (local lab) starts two test copies, enters N. Sanity Beach in both, injects the mod (UDP
+  between the copies), drives A and asserts on both games and both mod logs: presence, crate replay (and no echo),
+  fruit, fall/respawn, level change, and invariants (both alive, no FAULT, no Windows error dialog, sampled 3 times).
+  A scorer self-test runs first. Last run: 15/15 checks, RESULT: PASS (mod dev16 = v18 code).
+- The suite found a bug: a crate B broke for A was re-listed by a rescan before the game freed it, and B then sent it
+  back as its own. Fixed in v18: spots broken for the friend are never sent.
+- Startup flake: a test copy crashed by itself while starting (exe+0x9945FF, no mod loaded). The suite now restarts a
+  copy that died during setup.
+- Disproved: removing our Coco request from the loader cache right after loading it ([loader+0x18], key =
+  exe+0xE45910(&pool, 8, exe+0xE556E0(name, 0x811C9DC5)); remove = exe+0xE03250(table, &key, key); lookup =
+  exe+0xDF5A10). The removal worked ("cache removal 1"), yet the next level entry still crashed at exe+0x768E00. The
+  game logged the pack as "coco:Hero_Crash_data_92", so Coco seems attached to hero chunk 92 itself. Next idea: a
+  chunk of its own for the puppet's hero, instead of pool 92's chunk.
