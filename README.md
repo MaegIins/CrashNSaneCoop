@@ -16,7 +16,8 @@ peer-to-peer through the game's own Steam connection: no server, no port to open
 | Friend's animations (run, jump, spin) | works in Crash 1 and Crash 3; characters still slide a little |
 | Crates: a crate one player breaks also breaks for the other (with its fruit, Aku Aku, crate count) | works in a two-copy lab test (not yet over Steam) |
 | Shared wumpa counter: fruit one player picks up is added for the other | works in a two-copy lab test (not yet over Steam) |
-| Show the friend as **Coco** instead of Crash (launcher checkbox) | works in Crash 1 lab test; Coco only animates from the friend's buttons for now |
+| Friend playing **Coco** (the game's hero switch) appears as Coco with her own animations | works in Crash 1 lab test (v15) |
+| Launcher checkbox: show a Crash friend as Coco anyway | works in Crash 1 lab test; that Coco only animates from the friend's buttons |
 | Crash 2 | the friend appears, but some animations do not map |
 | Deaths, checkpoints, level end | not handled |
 | More than 2 players | no |
@@ -26,7 +27,7 @@ of the game on one PC for crates, fruit and Coco). No automated test suite yet.
 
 Known issues:
 - Characters slide a bit while running.
-- Coco does not get her own animations yet (Crash's animation events killed the Coco puppet, so they are off for her).
+- With the "show as Coco" checkbox, a friend who plays Crash appears as Coco without her animation events (Crash's events do not fit Coco's animation graph). A friend who really plays Coco gets all her animations.
 - The game was seen crashing once while the friend's puppet was removed below the level; v14 parks it above the
   level instead (not yet confirmed in a real session).
 
@@ -69,7 +70,7 @@ or run `build.ps1`, which builds into `dist/` and copies the launcher next to it
 - Crates: a broken crate's component disappears from memory; its position is sent, and the other game hits its own
   crate there with the game's damage function, so the game itself handles fruit and counters.
 - Fruit: the real wumpa counter is a game variable; each side sends what it picked up, the other side adds it.
-- Coco: the mod loads Coco's hero pack into the local hero's memory pool, next to Crash, and clones her prototype.
+- Heroes: each side sends the hero it plays. When it is not the local hero, the mod loads that hero's pack into the local hero's memory pool and clones its prototype.
 
 All the reverse-engineering notes (addresses, what was tried, what failed) are in
 [docs/RESEARCH-NOTES.md](docs/RESEARCH-NOTES.md).
@@ -92,5 +93,5 @@ mouvements, et synchronise les caisses cassées et les fruits Wumpa. Tout passe 
 `Lancer Crash Coop.cmd`, colle le SteamID64 de ton ami, clique « 1. Lancer le jeu ». Le mod s'active tout seul.
 La case « Voir mon ami en Coco » change son apparence (prise en compte à la prochaine activation du mod).
 
-**Limites connues :** les persos glissent un peu ; Coco n'a pas encore ses propres animations ; morts et checkpoints
+**Limites connues :** les persos glissent un peu ; si ton ami joue Coco, il apparaît en Coco avec ses animations, mais la case « Voir mon ami en Coco » sur un ami qui joue Crash donne une Coco sans ses animations ; morts et checkpoints
 ne sont pas gérés ; Crash 2 incomplet ; 2 joueurs maximum. Version du jeu supportée : Steam, build 2964270.

@@ -35,11 +35,12 @@ static char g_dir[MAX_PATH];   /* folder of this DLL: config, log and stop file 
 #define NEV 32
 typedef struct { unsigned magic; unsigned short version; unsigned seq; unsigned session; unsigned level; float pos[3]; float euler[3]; float quat[4]; unsigned char input[48];
     unsigned evSeq; short evId[NEV]; float runSpeed; int turbo; int groundState;
-    unsigned crSeq; float crPos[8][3]; unsigned fruitTotal; } Packet;
+    unsigned crSeq; float crPos[8][3]; unsigned fruitTotal; char hero[8]; } Packet;
 // v6: crates = positions of the last 8 crates the sender broke, with a running sequence number (like the events)
 // v7: fruitTotal = wumpa fruit the sender gained since its mod started (shared fruit counter)
 #define NCR 8
-#define PKT_VERSION 7
+// v8: hero = the hero the sender plays ("Crash" or "Coco")
+#define PKT_VERSION 8
 // v3: input = the identified ActorInput fields (buttons + stick, never pointers) so the puppet animates by itself
 static const int IN_OFF[6] = { 0x20, 0x78, 0x3C, 0xA0, 0xC0, 0xD0 }, IN_LEN[6] = { 8, 8, 4, 12, 8, 8 };
 static void read_input(DWORD64 ai, unsigned char *o);
@@ -119,7 +120,12 @@ static volatile LONG g_cocoReq; static volatile DWORD64 g_cocoReqObj; static int
 // Replaying Crash's behavior event ids on the Coco puppet made it shatter and vanish (lab, 2026-11-02: events 82 87 83,
 // a jump): Coco's graph numbers its events differently. Until events are translated by name, the Coco puppet gets no
 // events and animates from the friend's buttons only (it then runs and jumps and stays alive).
-static volatile int g_pupCoco;
+static volatile int g_pupCoco;   /* 1 = puppet hero differs from the friend's: no events */
+static char g_pupHero[8], g_pupFor[8], g_packName[8] = "Coco";
+// our own hero = slot 0's wanted hero name in CPlayerEntityManager (+0x100, a char*), "Crash" or "Coco"
+static int safe_read(DWORD64 a, void *dst, SIZE_T n); static DWORD64 rd(DWORD64 a);
+static void my_hero(char *o) { DWORD64 pem = rd(g_base + 0x1A68600), s = pem ? rd(pem + 0x100) : 0; o[0] = 0;
+    if (!s || !safe_read(s, o, 7)) strcpy(o, "Crash"); o[7] = 0; for (int i = 0; i < 8; i++) if (o[i] && (o[i] < 32 || o[i] > 126)) { o[i] = 0; break; } if (!o[0]) strcpy(o, "Crash"); }
 
 // --- shared wumpa counter (v13) -------------------------------------------------------------------------------------
 // The real counter is a CGameVariableValue (vtable RVA 0x155F090, int at +0x10); writing it works (the HUD follows,
@@ -165,10 +171,14 @@ static int safe_read(DWORD64 a, void *dst, SIZE_T n) { SIZE_T got = 0; return a 
 static char g_protoName[8] = "Crash";
 static DWORD64 find_prototype(void) {
     DWORD64 vt = g_base + CACTOR_VT, a = 0x10000, self = player_actor(); MEMORY_BASIC_INFORMATION mi;
+    // skip our own thread's stack: it holds the vtable value and the hero name we look for (v15 "found" a prototype
+    // there and the spawn failed)
+    NT_TIB *tib = (NT_TIB *)NtCurrentTeb(); DWORD64 stLo = (DWORD64)tib->StackLimit, stHi = (DWORD64)tib->StackBase;
     static unsigned char chunk[1 << 20];
     while (a < 0x7FFFFFFF0000ull && VirtualQuery((void *)a, &mi, sizeof mi)) {
         DWORD64 b = (DWORD64)mi.BaseAddress, s = mi.RegionSize; a = b + s;
         if (mi.State != MEM_COMMIT || mi.Type != MEM_PRIVATE || (mi.Protect & 0xFF) != PAGE_READWRITE || (mi.Protect & PAGE_GUARD)) continue;
+        if (b < stHi && b + s > stLo) continue;
         for (DWORD64 off = 0; off < s; off += sizeof chunk) {
             SIZE_T len = (SIZE_T)((s - off) < sizeof chunk ? (s - off) : sizeof chunk);
             if (!safe_read(b + off, chunk, len)) continue;
@@ -278,7 +288,7 @@ static LONG CALLBACK veh(PEXCEPTION_POINTERS ep) {
         c->Dr6 = 0; c->EFlags |= 0x10000; g_curBC = c->Rcx;
         if (g_cocoReq == 1) {  // load the Coco hero pack next to Crash (see "Coco puppet" below)
             DWORD64 s = 0, req = 0; g_cocoReq = 2;
-            ((void (*)(DWORD64 *, const char *))(g_base + 0xDCE380))(&s, "Coco");
+            ((void (*)(DWORD64 *, const char *))(g_base + 0xDCE380))(&s, g_packName);
             DWORD64 pool = ((DWORD64 (*)(unsigned))(g_base + 0xDF0AD0))(92);
             DWORD64 loader = rd(g_base + 0x1A61C88);
             if (s && pool && loader) ((DWORD64 * (*)(DWORD64, DWORD64 *, DWORD64, DWORD64, int))(g_base + 0x4EBDB0))(loader, &req, s, pool, 1);
@@ -556,7 +566,7 @@ static DWORD WINAPI worker(LPVOID arg) {
     AddVectoredExceptionHandler(0, crash_logger);   // last in line: logs fatal-looking faults, never handles them
     g_session = (GetTickCount() * 2654435761u) ^ (GetCurrentProcessId() << 16) ^ (unsigned)(DWORD64)&g_cs;
     { char cp[MAX_PATH]; sprintf(cp, "%scoop.coco", g_dir); g_wantCoco = GetFileAttributesA(cp) != INVALID_FILE_ATTRIBUTES; }
-    { char lv[128]; level_hash(lv, sizeof lv); fprintf(g_log, "mod v14 (packet v7)%s, session %08X, level now '%s'\n", g_wantCoco ? ", friend shown as Coco" : "", g_session, lv); fflush(g_log); }
+    { char lv[128]; level_hash(lv, sizeof lv); fprintf(g_log, "mod v15 (packet v8)%s, session %08X, level now '%s'\n", g_wantCoco ? ", friend shown as Coco" : "", g_session, lv); fflush(g_log); }
 
     DWORD rxTid = 0;
     if (!strcmp(mode, "steam") || !strcmp(mode, "steamprobe")) {
@@ -603,16 +613,24 @@ static DWORD WINAPI worker(LPVOID arg) {
         } else if (now && show && !g_puppet && g_spawnState == 0 && GetTickCount() - stableSince > 2000 && !strstr(name, "nospawn")) {
             // spawn only when the friend is actually visible (a hidden puppet is parked below the level, where the
             // game's kill plane destroys it cleanly; it is respawned here when the friend comes back)
-            strcpy(g_protoName, "Crash");
-            if (g_wantCoco) {   // load Coco's hero pack once per level, then clone her prototype (fallback: Crash)
-                static DWORD64 cocoFor;
-                if (cocoFor != now) { cocoFor = now; g_cocoReq = 1; for (int i = 0; i < 100 && g_cocoReq != 2; i++) Sleep(10);
-                    fprintf(g_log, "coco: pack requested (request 0x%llX)\n", g_cocoReqObj); fflush(g_log); }
-                strcpy(g_protoName, "Coco");
+            // which hero: the one the friend plays (packet v8); "Show my friend as Coco" turns a Crash friend into Coco
+            char mine[8], want[8]; my_hero(mine);
+            strcpy(want, cur.hero[0] ? cur.hero : mine); want[7] = 0;
+            if (g_wantCoco && !strcmp(want, "Crash")) strcpy(want, "Coco");
+            if (strcmp(want, "Crash") && strcmp(want, "Coco")) strcpy(want, mine);   // unknown name: stay safe
+            g_proto = 0;
+            if (strcmp(want, mine)) {   // not our own hero: its pack is not loaded, ask for it once per level and hero
+                static DWORD64 packFor; static char packName[8];
+                if (packFor != now || strcmp(packName, want)) {
+                    packFor = now; strcpy(packName, want); strcpy(g_packName, want);
+                    g_cocoReq = 1; for (int i = 0; i < 100 && g_cocoReq != 2; i++) Sleep(10);
+                    fprintf(g_log, "hero: %s pack requested (request 0x%llX)\n", want, g_cocoReqObj); fflush(g_log);
+                }
+                strcpy(g_protoName, want);
                 for (int i = 0; i < 16 && !(g_proto = find_prototype()); i++) Sleep(500);
-                if (!g_proto) { strcpy(g_protoName, "Crash"); fprintf(g_log, "coco: no Coco prototype, using Crash\n"); }
+                if (!g_proto) fprintf(g_log, "hero: no %s prototype, using %s\n", want, mine);
             }
-            if (!g_proto) g_proto = find_prototype();
+            if (!g_proto) { strcpy(g_protoName, mine); g_proto = find_prototype(); }
             if (g_proto && player_actor() == now && safe_read(now + 0x20, g_spawnPos, 12)) {
                 g_spawnPos[1] += 150.0f;
                 g_poolOwner = now;
@@ -620,7 +638,9 @@ static DWORD WINAPI worker(LPVOID arg) {
                 for (int i = 0; i < 100 && g_spawnState != 3; i++) Sleep(50);
                 set_all(0, 0, rxTid); Sleep(200);
                 if (player_actor() != now) g_puppet = 0;      // level changed during the spawn
-                g_pupCoco = !strcmp(g_protoName, "Coco");
+                strcpy(g_pupHero, g_protoName); strcpy(g_pupFor, cur.hero);
+                // events only when the puppet has the same hero (same behavior graph) as the friend
+                g_pupCoco = strcmp(g_pupHero, cur.hero[0] ? cur.hero : "Crash") != 0;
             } else g_spawnState = 4;                        // no prototype in this level: don't retry until it changes
             fprintf(g_log, "player 0x%llX prototype 0x%llX spawn state %ld puppet 0x%llX\n", now, g_proto, g_spawnState, g_puppet); fflush(g_log);
         }
@@ -690,7 +710,7 @@ static DWORD WINAPI worker(LPVOID arg) {
                     DWORD64 bc = g_myBC, w = bc ? rd(rd(rd(rd(bc + 0x30) + 0x80) + 0x110) + 0x10) : 0;
                     if (w) { safe_read(w + 21 * 4, &p.runSpeed, 4); safe_read(w + 18 * 4, &p.turbo, 4); safe_read(w + 24 * 4, &p.groundState, 4); }
                 }
-                p.fruitTotal = g_myFruit;
+                p.fruitTotal = g_myFruit; my_hero(p.hero);
                 { LONG h = g_myCrHead; p.crSeq = (unsigned)h;
                   for (int k = 0; k < NCR; k++) { LONG s = h - NCR + k; if (s >= 0) memcpy(p.crPos[k], g_myCr[s & 255], 12); } }
                 { unsigned long long now; memcpy(&now, p.input, 8); now |= g_pendingNow; memcpy(p.input, &now, 8); g_pendingNow = 0; }
@@ -704,6 +724,17 @@ static DWORD WINAPI worker(LPVOID arg) {
             g_puppet = 0; pup = 0; g_spawnState = 0; stableSince = GetTickCount();   // destroyed by the game: allow a respawn
             fprintf(g_log, "puppet gone (destroyed by the game), will respawn when the friend is visible\n"); fflush(g_log);
         }
+        // the friend switched hero: retire this puppet (kept parked above the level, never left to fall into the kill
+        // plane) and spawn one with the new hero
+        static DWORD64 retired[8]; static int nRetired;
+        if (pup && show && cur.hero[0] && strcmp(cur.hero, g_pupFor) && nRetired < 8) {
+            fprintf(g_log, "friend switched hero %s -> %s: new puppet\n", g_pupFor, cur.hero); fflush(g_log);
+            retired[nRetired++] = pup; g_puppet = 0; pup = 0; pxf = 0; g_spawnState = 0; stableSince = GetTickCount() - 1500;
+        }
+        if (now != lastActor) nRetired = 0;
+        for (int r = 0; r < nRetired; r++) { DWORD64 rv = 0; DWORD fl = 0; float hi[3] = { 0, 0, 100000.0f };
+            if (!safe_read(retired[r], &rv, 8) || rv != g_base + CACTOR_VT) continue;
+            safe_write(retired[r] + 0x20, hi, 12); if (safe_read(retired[r] + 0x38, &fl, 4)) { fl |= 0x400; safe_write(retired[r] + 0x38, &fl, 4); } }
         {   // behavior characters: looking them up walks ~75 components, so only every 250 ms or when an actor changes
             // (doing it every loop slowed the loop 4x: ~17 packets/s instead of ~60)
             static DWORD64 lastMe, lastPup; static DWORD lastLook;

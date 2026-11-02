@@ -630,3 +630,20 @@ Observed:
 Mod v14: an empty file `coop.coco` next to the dll shows the friend as Coco. The pack is requested once per level,
 the Coco prototype is looked for for up to 8 s (fallback: Crash), and no events are replayed on a Coco puppet.
 Not done: translating events by name for Coco; Crash 2 and Crash 3; level changes with Coco loaded; play over Steam.
+
+### The puppet takes the friend's real hero: mod v15 / packet v8 (2026-11-02, two test copies)
+
+- Our own hero = slot 0's wanted name in CPlayerEntityManager (+0x100, a char*). It is sent in the packet (`hero`).
+- The receiver spawns the puppet with that hero. If it is not its own hero, it first loads that pack with the v14
+  trick: exe+0x4EBDB0 into pool(92). This works both ways: a Coco player gets "Loaded chunk 'crash:Hero_Coco_data_92'"
+  and a Crash puppet.
+- Events are replayed only when the puppet's hero equals the friend's hero, so the behavior graphs match. The
+  "Show my friend as Coco" option still makes a Crash friend look like Coco, without events.
+- If the friend switches hero, the old puppet is retired (kept parked above the level, never left to the kill plane)
+  and a new one is spawned.
+- Bug fixed on the way: find_prototype must skip the mod thread's own stack. Its locals (the CActor vtable value and
+  the hero name) matched first, and the spawn then failed.
+- Test that ran: A switched to Coco by writing slot 0's wanted name (as the game's own hero switch does; the friend's
+  100% save shows "CHANGER DE HEROS" on the Crash 1 map). B saw A as Coco with replayed events (158, 163...): running,
+  jumping, spinning, alive. A saw B as Crash.
+- Side note: loading a 100% save in a test copy unlocks Steam achievements on the account running it.
