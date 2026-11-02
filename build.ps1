@@ -8,4 +8,8 @@ New-Item -ItemType Directory -Force $dist | Out-Null
 & $zig cc -target x86_64-windows-gnu -shared -O2 (Join-Path $here 'src\crash-coop.c') -o (Join-Path $dist 'crash-coop.dll') -lws2_32 -lwinmm
 if ($LASTEXITCODE -ne 0) { throw 'build failed' }
 Copy-Item (Join-Path $here 'launcher\*') $dist -Force
+# test helper used by tests\suite.ps1 (enters a level with the game's own "loadmap" console command)
+New-Item -ItemType Directory -Force (Join-Path $dist 'tests') | Out-Null
+& $zig cc -target x86_64-windows-gnu -shared -O2 (Join-Path $here 'tests\loadmap.c') -o (Join-Path $dist 'tests\loadmap.dll')
+if ($LASTEXITCODE -ne 0) { throw 'loadmap build failed' }
 "Built: $dist"

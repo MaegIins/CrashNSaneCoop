@@ -13,18 +13,18 @@ peer-to-peer through the game's own Steam connection: no server, no port to open
 | Feature | State |
 |---|---|
 | See your friend in your level (position, rotation) | works, played over Steam |
-| Friend's animations (run, jump, spin) | works in Crash 1 and Crash 3; characters still slide a little |
+| Friend's animations (run, jump, spin) | works in Crash 1, 2 and 3; characters still slide a little |
 | Crates: a crate one player breaks also breaks for the other (with its fruit, Aku Aku, crate count) | works in a two-copy lab test (not yet over Steam) |
 | Shared wumpa counter: fruit one player picks up is added for the other | works in a two-copy lab test (not yet over Steam) |
 | Both players on the same hero (Crash/Crash or Coco/Coco): the friend appears with that hero and all animations | works (Coco/Coco: Crash 1 lab test) |
 | Friend on another hero than you (e.g. they play Coco, you play Crash) | shown with **your** hero, moved by their buttons only (loading the other hero crashed the game on level changes, v14/v15) |
-| Crash 2 | the friend appears, but some animations do not map |
+| Crash 2 and Crash 3 | crates, fruit, falls and level reloads pass the same automated test as Crash 1 |
 | Deaths and falls | the friend's puppet hides while they fall into a pit and comes back when they respawn; crates restored by a death are not re-sent |
 | Checkpoints, level end | not synced (each player has their own) |
 | More than 2 players | no |
 
 QA: an automated two-client suite ([tests/](tests/README.md)) drives two copies of the game on one PC and checks presence,
-crate replay, fruit, falls and level changes (last full run: 15/15, RESULT: PASS). Presence and animations were also
+crate replay, fruit, falls and level changes, in any level (last runs with v18: Crash 1, 2 and 3, each 15/15 PASS). Presence and animations were also
 played over Steam by two people.
 
 Known issues:
