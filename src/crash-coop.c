@@ -287,16 +287,13 @@ static void arm_all(DWORD skip) {
     CloseHandle(s);
 }
 static void set_all(DWORD64 addr, DWORD64 dr7, DWORD skip) { g_dr0 = addr; g_dr0on = (dr7 & 1) != 0; arm_all(skip); }
-static LONG CALLBACK veh(PEXCEPTION_POINTERS ep) {
-    CONTEXT *c = ep->ContextRecord;
-    if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP) return EXCEPTION_CONTINUE_SEARCH;
-    if ((c->Dr6 & 2) && c->Rip == g_base + FIRE_RVA) {          // an event fired: record it if it is for our Crash
-        c->Dr6 = 0; c->EFlags |= 0x10000;
-        if (c->Rcx && c->Rcx == g_myBC) { LONG i = g_capHead; g_cap[i & 255] = (short)c->Rdx; g_capHead = i + 1; g_captured++; }
-        return EXCEPTION_CONTINUE_EXECUTION;
-    }
-    if ((c->Dr6 & 8) && c->Rip == g_base + SYNC_RVA) {          // per-character behavior sync: replay events on the puppet
-        c->Dr6 = 0; c->EFlags |= 0x10000; g_curBC = c->Rcx;
+// Work that must run on the game's MAIN thread: hitting a crate for the friend, asking for a hero pack. v13-v19 did it
+// from the behavior sync (exe+0x3733F0), which also runs on the game's worker threads: a crate hit from there sometimes
+// deadlocked the game (main thread and workers all waiting at exe+0xDF8AE6/0xDF8AF3, lab 2026-11-03). Now it runs from
+// DR0 on the hero manager's per-frame update exe+0x511480 (main thread; the probes swapped heroes and ran console
+// commands from there safely). DR0 is lent to the spawn hook while a puppet is spawned.
+#define MAIN_RVA 0x511480
+static void main_tasks(void) {
         if (g_cocoReq == 1) {  // load the Coco hero pack next to Crash (see "Coco puppet" below)
             DWORD64 s = 0, req = 0;
             ((void (*)(DWORD64 *, const char *))(g_base + 0xDCE380))(&s, g_packName);
@@ -322,6 +319,17 @@ static LONG CALLBACK veh(PEXCEPTION_POINTERS ep) {
             if (safe_read(g_hitComp, &vt, 8) && vt == g_base + DESTR_VT && g_hitAtt == player_actor())
                 ((unsigned char (*)(DWORD64, DWORD64, DWORD64))(g_base + DAMAGE_RVA))(g_hitDef, g_hitAtt, g_hitTgt);
         }
+}
+static LONG CALLBACK veh(PEXCEPTION_POINTERS ep) {
+    CONTEXT *c = ep->ContextRecord;
+    if (ep->ExceptionRecord->ExceptionCode != EXCEPTION_SINGLE_STEP) return EXCEPTION_CONTINUE_SEARCH;
+    if ((c->Dr6 & 2) && c->Rip == g_base + FIRE_RVA) {          // an event fired: record it if it is for our Crash
+        c->Dr6 = 0; c->EFlags |= 0x10000;
+        if (c->Rcx && c->Rcx == g_myBC) { LONG i = g_capHead; g_cap[i & 255] = (short)c->Rdx; g_capHead = i + 1; g_captured++; }
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    if ((c->Dr6 & 8) && c->Rip == g_base + SYNC_RVA) {          // per-character behavior sync: replay events on the puppet
+        c->Dr6 = 0; c->EFlags |= 0x10000; g_curBC = c->Rcx;
         if (c->Rcx && c->Rcx == g_pupBC) {
             int n = 0;
             while (g_rqTail != g_rqHead && n < 64) { short id = g_rq[g_rqTail & 255]; g_rqTail++; n++;
@@ -354,6 +362,7 @@ static LONG CALLBACK veh(PEXCEPTION_POINTERS ep) {
         return EXCEPTION_CONTINUE_EXECUTION;
     }
     if (!(c->Dr6 & 1)) return EXCEPTION_CONTINUE_SEARCH;
+    if (c->Rip == g_base + MAIN_RVA) { c->Dr6 = 0; c->EFlags |= 0x10000; main_tasks(); return EXCEPTION_CONTINUE_EXECUTION; }
     c->Dr6 = 0; c->Dr7 &= ~1ull; c->EFlags |= 0x10000;
     if (c->Rip == g_base + HOOK_RVA && InterlockedCompareExchange(&g_spawnState, 2, 1) == 1) {
         // 4th argument = "pool owner": core 0x772CB0 allocates the new entity in the memory pool of this object
@@ -592,7 +601,7 @@ static DWORD WINAPI worker(LPVOID arg) {
     g_session = (GetTickCount() * 2654435761u) ^ (GetCurrentProcessId() << 16) ^ (unsigned)(DWORD64)&g_cs;
     { char cp[MAX_PATH]; sprintf(cp, "%scoop.coco", g_dir); g_wantCoco = GetFileAttributesA(cp) != INVALID_FILE_ATTRIBUTES;
       sprintf(cp, "%scoop.experimental", g_dir); g_experimental = GetFileAttributesA(cp) != INVALID_FILE_ATTRIBUTES; }
-    { char lv[128]; level_hash(lv, sizeof lv); fprintf(g_log, "mod v19 (packet v8)%s, session %08X, level now '%s'\n", g_wantCoco ? ", friend shown as Coco" : "", g_session, lv); fflush(g_log); }
+    { char lv[128]; level_hash(lv, sizeof lv); fprintf(g_log, "mod v20 (packet v8)%s, session %08X, level now '%s'\n", g_wantCoco ? ", friend shown as Coco" : "", g_session, lv); fflush(g_log); }
 
     DWORD rxTid = 0;
     if (!strcmp(mode, "steam") || !strcmp(mode, "steamprobe")) {
@@ -616,7 +625,7 @@ static DWORD WINAPI worker(LPVOID arg) {
     }
     fflush(g_log);
     PVOID vehHandle = AddVectoredExceptionHandler(1, veh);   // permanent: animation hooks + one-shot spawn hook
-    g_animOn = 1; arm_all(rxTid); DWORD lastArm = GetTickCount();
+    g_animOn = 1; set_all(g_base + MAIN_RVA, 1ull, rxTid); DWORD lastArm = GetTickCount();
     DWORD scanTid = 0; { HANDLE st = CreateThread(NULL, 0, crate_scanner, NULL, 0, NULL); if (st) { scanTid = GetThreadId(st); CloseHandle(st); } }
     DWORD lastScan = 0, lastCrPoll = 0; DWORD64 scannedFor = 0;
 
@@ -674,7 +683,7 @@ static DWORD WINAPI worker(LPVOID arg) {
                 g_poolOwner = now;
                 g_spawnState = 1; set_all(g_base + HOOK_RVA, 1ull, rxTid);
                 for (int i = 0; i < 100 && g_spawnState != 3; i++) Sleep(50);
-                set_all(0, 0, rxTid); Sleep(200);
+                set_all(g_base + MAIN_RVA, 1ull, rxTid); Sleep(200);   // DR0 back to the main-thread task hook
                 if (player_actor() != now) g_puppet = 0;      // level changed during the spawn
                 strcpy(g_pupHero, g_protoName); strcpy(g_pupFor, cur.hero);
                 // events only when the puppet has the same hero (same behavior graph) as the friend
@@ -875,7 +884,7 @@ static DWORD WINAPI worker(LPVOID arg) {
     }
     if (g_sock != INVALID_SOCKET) { closesocket(g_sock); WSACleanup(); }
     timeEndPeriod(1);
-    g_pupBC = 0; g_animOn = 0; arm_all(0); Sleep(100); RemoveVectoredExceptionHandler(vehHandle);
+    g_pupBC = 0; g_animOn = 0; g_dr0on = 0; arm_all(0); Sleep(100); RemoveVectoredExceptionHandler(vehHandle);
     fprintf(g_log, "stopped\n"); fclose(g_log);
     return 0;
 }

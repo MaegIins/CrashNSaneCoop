@@ -36,7 +36,7 @@ tests\suite.ps1 -Level crash2/l201_turtlewoods/l201_turtlewoods -CrateA '16.1,11
 tests\suite.ps1 -Level crash3/l301_toadvillage/l301_toadvillage -CrateA '-92.9,16.0,84.9' -CrateB '-171.9,-221.0,84.0;-65.8,1382.3,79.6' -Checkpoint none
 ```
 
-Last results (v19): Crash 1 N. Sanity Beach 19/19 (with the checkpoint check), Crash 2 Turtle Woods 15/15, Crash 3 Toad Village 15/15 (`-Checkpoint none`).
+Last results (v20): Crash 1 N. Sanity Beach 19/19 twice (with the checkpoint check), Crash 2 Turtle Woods 15/15, Crash 3 Toad Village 15/15 (`-Checkpoint none`).
 
 Windows A and B open side
 by side on the left and right halves of the screen; leave them visible, because keys and clicks are sent to them.

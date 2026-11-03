@@ -26,7 +26,7 @@ peer-to-peer through the game's own Steam connection: no server, no port to open
 | More than 2 players | no |
 
 QA: an automated two-client suite ([tests/](tests/README.md)) drives two copies of the game on one PC and checks presence,
-crate replay, fruit, falls and level changes, in any level (last runs with v19: Crash 1 19/19 with the checkpoint check, Crash 2 and 3 15/15). Presence and animations were also
+crate replay, fruit, falls and level changes, in any level (last runs with v20: Crash 1 19/19 with the checkpoint check, Crash 2 and 3 15/15). Presence and animations were also
 played over Steam by two people.
 
 Known issues:
